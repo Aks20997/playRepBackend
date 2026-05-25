@@ -38,8 +38,8 @@ func InitRedis() {
 func InitMongo() *mongo.Client {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-
-	clientOptions := options.Client().ApplyURI("mongodb+srv://royalplay209:IbgiZSjLJ85QT4Y2@fungamecluster.eioe1np.mongodb.net/?retryWrites=true&w=majority&appName=FunGameCluster")
+	URL := "URL_HERE"
+	clientOptions := options.Client().ApplyURI(URL)
 	// clientOptions := options.Client().ApplyURI("mongodb://localhost:27017")
 	client, err := mongo.Connect(ctx, clientOptions)
 	if err != nil {
