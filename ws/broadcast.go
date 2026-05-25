@@ -1,514 +1,358 @@
-// package ws
-
-// import (
-// 	"context"
-// 	"encoding/json"
-// 	"log"
-// 	"net/http"
-// 	"sync"
-// 	"time"
-
-// 	"github.com/gin-gonic/gin"
-// 	"github.com/gorilla/websocket"
-// 	"go.mongodb.org/mongo-driver/bson"
-// 	"go.mongodb.org/mongo-driver/mongo"
-// 	"go.mongodb.org/mongo-driver/mongo/options"
-// )
-
-// var (
-// 	clients   = make(map[*websocket.Conn]string)
-// 	broadcast = make(chan []byte)
-// 	upgrader  = websocket.Upgrader{
-// 		CheckOrigin: func(r *http.Request) bool { return true },
-// 	}
-// 	mutex sync.Mutex
-// )
-
-// func InitWebSocket(router *gin.Engine, client *mongo.Client) {
-// 	go watchChanges(context.Background(), client.Database("FunRepDB").Collection("CommonData"))
-// 	go handleBroadcasts()
-
-// 	router.GET("/ws", func(c *gin.Context) {
-// 		handleConnections(c.Writer, c.Request, client)
-// 	})
-// }
-
-// func handleConnections(w http.ResponseWriter, r *http.Request, client *mongo.Client) {
-// 	userId := r.URL.Query().Get("userId")
-// 	if userId == "" {
-// 		http.Error(w, "User ID is required", http.StatusBadRequest)
-// 		return
-// 	}
-
-// 	ws, err := upgrader.Upgrade(w, r, nil)
-// 	if err != nil {
-// 		log.Println("WebSocket upgrade error:", err)
-// 		return
-// 	}
-// 	defer ws.Close()
-
-// 	mutex.Lock()
-// 	clients[ws] = userId
-// 	mutex.Unlock()
-
-// 	commonColl := client.Database("FunRepDB").Collection("RealtimeData")
-// 	userColl := client.Database("FunRepDB").Collection("Users")
-
-// 	go sendCommonData(ws, commonColl)
-// 	go sendUserSpecificData(ws, userId, userColl)
-
-// 	for {
-// 		_, _, err := ws.ReadMessage()
-// 		if err != nil {
-// 			mutex.Lock()
-// 			delete(clients, ws)
-// 			mutex.Unlock()
-// 			break
-// 		}
-// 	}
-// }
-
-// func sendCommonData(ws *websocket.Conn, commonColl *mongo.Collection) {
-// 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-// 	defer cancel()
-
-// 	projection := bson.M{
-// 		"roundsData1": 0,
-// 		"roundsData2": 0,
-// 	}
-
-// 	cursor, err := commonColl.Find(ctx, bson.M{}, options.Find().SetProjection(projection))
-// 	if err != nil {
-// 		log.Println("Initial Find error:", err)
-// 		return
-// 	}
-// 	defer cursor.Close(ctx)
-
-// 	for cursor.Next(ctx) {
-// 		var doc bson.M
-// 		if err := cursor.Decode(&doc); err == nil {
-// 			if data, err := json.Marshal(doc); err == nil {
-// 				if err := SafeWrite(ws, websocket.TextMessage, data); err != nil {
-// 					log.Println("Error writing initial common data:", err)
-// 					return
-// 				}
-// 			}
-// 		}
-// 	}
-// }
-
-// func sendUserSpecificData(ws *websocket.Conn, userId string, userColl *mongo.Collection) {
-// 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-// 	defer cancel()
-
-// 	var userDoc bson.M
-// 	err := userColl.FindOne(ctx, bson.M{"Id": userId}).Decode(&userDoc)
-// 	if err != nil {
-// 		log.Println("Error fetching user data:", err)
-// 		return
-// 	}
-
-// 	userData := map[string]interface{}{
-// 		"userId":      userId,
-// 		"isBetLocked": userDoc["isBetLocked"],
-// 	}
-
-// 	data, err := json.Marshal(userData)
-// 	if err != nil {
-// 		log.Println("Error marshalling user data:", err)
-// 		return
-// 	}
-
-// 	if err := SafeWrite(ws, websocket.TextMessage, data); err != nil {
-// 		log.Println("Error sending user-specific data:", err)
-// 	}
-// }
-
-// func handleBroadcasts() {
-// 	for {
-// 		msg := <-broadcast
-// 		mutex.Lock()
-// 		for client := range clients {
-// 			if err := SafeWrite(client, websocket.TextMessage, msg); err != nil {
-// 				log.Println("Error broadcasting to client:", err)
-// 				client.Close()
-// 				delete(clients, client)
-// 			}
-// 		}
-// 		mutex.Unlock()
-// 	}
-// }
-
-// func watchChanges(ctx context.Context, coll *mongo.Collection) {
-// 	opts := options.ChangeStream().SetFullDocument(options.UpdateLookup)
-// 	stream, err := coll.Watch(ctx, mongo.Pipeline{}, opts)
-// 	if err != nil {
-// 		log.Fatal("Mongo watch error:", err)
-// 	}
-// 	defer stream.Close(ctx)
-
-// 	for stream.Next(ctx) {
-// 		var event bson.M
-// 		if err := stream.Decode(&event); err == nil {
-// 			if fullDoc, ok := event["fullDocument"]; ok {
-// 				if data, err := json.Marshal(fullDoc); err == nil {
-// 					log.Println("Broadcasting updated data...")
-// 					broadcast <- data
-// 				}
-// 			}
-// 		}
-// 	}
-// }
-
-// func SafeWrite(conn *websocket.Conn, messageType int, data []byte) error {
-// 	mutex.Lock()
-// 	defer mutex.Unlock()
-// 	return conn.WriteMessage(messageType, data)
-// }
-
-//=============================================================================================
-
-// package ws
-
-// import (
-// 	"context"
-// 	"encoding/json"
-// 	"log"
-// 	"net/http"
-// 	"sync"
-// 	"time"
-
-// 	"github.com/gin-gonic/gin"
-// 	"github.com/gorilla/websocket"
-// 	"go.mongodb.org/mongo-driver/bson"
-// 	"go.mongodb.org/mongo-driver/mongo"
-// 	"go.mongodb.org/mongo-driver/mongo/options"
-// )
-
-// var (
-// 	clients   = make(map[*websocket.Conn]string) // Map of WebSocket connections to user IDs
-// 	broadcast = make(chan []byte)
-// 	upgrader  = websocket.Upgrader{
-// 		CheckOrigin: func(r *http.Request) bool { return true },
-// 	}
-// 	mutex sync.Mutex
-// )
-
-// func InitWebSocket(router *gin.Engine, client *mongo.Client) {
-// 	go watchChanges(context.Background(), client.Database("FunRepDB").Collection("CommonData"))
-// 	go handleBroadcasts()
-
-// 	router.GET("/ws", func(c *gin.Context) {
-// 		handleConnections(c.Writer, c.Request, client)
-// 	})
-// }
-
-// func handleConnections(w http.ResponseWriter, r *http.Request, client *mongo.Client) {
-// 	userId := r.URL.Query().Get("userId")
-// 	if userId == "" {
-// 		http.Error(w, "User ID is required", http.StatusBadRequest)
-// 		return
-// 	}
-
-// 	ws, err := upgrader.Upgrade(w, r, nil)
-// 	if err != nil {
-// 		log.Println("WebSocket upgrade error:", err)
-// 		return
-// 	}
-// 	defer ws.Close()
-
-// 	mutex.Lock()
-// 	clients[ws] = userId
-// 	mutex.Unlock()
-
-// 	// Use different collections for common and user-specific data
-// 	commonColl := client.Database("FunRepDB").Collection("RealtimeData")
-// 	userColl := client.Database("FunRepDB").Collection("Users")
-
-// 	go sendCommonData(ws, commonColl)
-// 	go sendUserSpecificData(ws, userId, userColl)
-
-// 	for {
-// 		_, _, err := ws.ReadMessage()
-// 		if err != nil {
-// 			mutex.Lock()
-// 			delete(clients, ws)
-// 			mutex.Unlock()
-// 			break
-// 		}
-// 	}
-// }
-
-// // Send common data to all clients
-// func sendCommonData(ws *websocket.Conn, commonColl *mongo.Collection) {
-// 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-// 	defer cancel()
-
-// 	// Define projection to exclude sensitive fields
-// 	projection := bson.M{
-// 		"roundsData1": 0,
-// 		"roundsData2": 0,
-// 	}
-
-// 	// Fetch common data (e.g., all documents, excluding certain fields)
-// 	cursor, err := commonColl.Find(ctx, bson.M{}, options.Find().SetProjection(projection))
-// 	if err != nil {
-// 		log.Println("Initial Find error:", err)
-// 		return
-// 	}
-// 	defer cursor.Close(ctx)
-
-// 	// Send each document as a WebSocket message
-// 	for cursor.Next(ctx) {
-// 		var doc bson.M
-// 		if err := cursor.Decode(&doc); err == nil {
-// 			if data, err := json.Marshal(doc); err == nil {
-// 				ws.WriteMessage(websocket.TextMessage, data) // Send document to client
-// 			}
-// 		}
-// 	}
-// }
-
-// // Send user-specific data to the connected user
-// func sendUserSpecificData(ws *websocket.Conn, userId string, userColl *mongo.Collection) {
-// 	// Query MongoDB for user-specific data (e.g., isBetLocked)
-// 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-// 	defer cancel()
-
-// 	var userDoc bson.M
-// 	err := userColl.FindOne(ctx, bson.M{"Id": userId}).Decode(&userDoc)
-// 	if err != nil {
-// 		log.Println("Error fetching user data:", err)
-// 		return
-// 	}
-
-// 	// Extract and send user-specific data (e.g., isBetLocked)
-// 	userData := map[string]interface{}{
-// 		"userId":      userId,
-// 		"isBetLocked": userDoc["isBetLocked"],
-// 	}
-
-// 	// Marshal and send to client
-// 	data, err := json.Marshal(userData)
-// 	if err != nil {
-// 		log.Println("Error marshalling user data:", err)
-// 		return
-// 	}
-
-// 	if err := ws.WriteMessage(websocket.TextMessage, data); err != nil {
-// 		log.Println("Error sending message to client:", err)
-// 	}
-// }
-
-// func handleBroadcasts() {
-// 	for {
-// 		// Handle new messages to broadcast to clients
-// 		msg := <-broadcast
-// 		mutex.Lock()
-// 		for client := range clients {
-// 			// Send message to all connected clients
-// 			if err := client.WriteMessage(websocket.TextMessage, msg); err != nil {
-// 				client.Close()          // Close client connection on error
-// 				delete(clients, client) // Remove client from map
-// 			}
-// 		}
-// 		mutex.Unlock()
-// 	}
-// }
-
-// func watchChanges(ctx context.Context, coll *mongo.Collection) {
-// 	// MongoDB change stream to listen for changes in the collection
-// 	opts := options.ChangeStream().SetFullDocument(options.UpdateLookup)
-// 	stream, err := coll.Watch(ctx, mongo.Pipeline{}, opts)
-// 	if err != nil {
-// 		log.Fatal("Mongo watch error:", err)
-// 	}
-// 	defer stream.Close(ctx)
-
-// 	// Continuously check for changes in the MongoDB collection
-// 	for stream.Next(ctx) {
-// 		var event bson.M
-// 		if err := stream.Decode(&event); err == nil {
-// 			if fullDoc, ok := event["fullDocument"]; ok {
-// 				// If full document exists in the change event, broadcast the update
-// 				if data, err := json.Marshal(fullDoc); err == nil {
-// 					broadcast <- data // Send update to broadcast channel
-// 				}
-// 			}
-// 		}
-// 	}
-// }
-
-// func handleConnections(w http.ResponseWriter, r *http.Request, coll *mongo.Collection) {
-// 	// Extract userId from query params
-// 	userId := r.URL.Query().Get("userId")
-// 	if userId == "" {
-// 		http.Error(w, "User ID is required", http.StatusBadRequest)
-// 		return
-// 	}
-
-// 	// Upgrade HTTP connection to WebSocket
-// 	ws, err := upgrader.Upgrade(w, r, nil)
-// 	if err != nil {
-// 		log.Println("WebSocket upgrade error:", err)
-// 		return
-// 	}
-// 	defer ws.Close()
-
-// 	// Register the user and their WebSocket connection
-// 	mutex.Lock()
-// 	clients[ws] = userId
-// 	mutex.Unlock()
-
-// 	commonColl := mongoClient.Database("FunRepDB").Collection("CommonData")
-// 	userColl := mongoClient.Database("FunRepDB").Collection("UserData")
-// 	// Send initial common data to the client
-// 	go sendCommonData(ws, coll)
-
-// 	// Send user-specific data to the client
-// 	go sendUserSpecificData(ws, userId, coll)
-
-// 	// Keep connection alive and remove on disconnect
-// 	for {
-// 		_, _, err := ws.ReadMessage()
-// 		if err != nil {
-// 			// Remove client from map when disconnected
-// 			mutex.Lock()
-// 			delete(clients, ws)
-// 			mutex.Unlock()
-// 			break
-// 		}
-// 	}
-// }
-
-//==========================================================================================================
-
 package ws
 
 import (
+	"FunRepBackend/config"
+	"FunRepBackend/models"
+	"FunRepBackend/session"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/websocket"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
+type Client struct {
+	Conn   *websocket.Conn
+	Mu     sync.Mutex
+	UserID string
+	Token  string
+}
+
+type GameDataPayload struct {
+	Type      string `json:"type"`
+	Roulette        GameNumbers       `json:"roulette"`
+	RouletteHistory []int             `json:"rouletteHistory"`
+	FunTarget       FunTargetNumbers  `json:"funTarget"`
+	FunTargetHistory []int            `json:"funTargetHistory"`
+	TripleFun       TripleFunNumbers  `json:"tripleFun"`
+	TripleFunHistory []string         `json:"tripleFunHistory"`
+	AndarBahar      AndarBaharNumbers `json:"andarBahar"`
+	ABHistory       []int             `json:"abHistory"`
+}
+
+type GameNumbers struct {
+	Winning int `json:"winning"`
+	Next    int `json:"next"`
+}
+
+type FunTargetNumbers struct {
+	Winning        int `json:"winning"`
+	Next           int `json:"next"`
+	Multiplier     int `json:"multiplier"`
+	NextMultiplier int `json:"nextMultiplier"`
+}
+
+type TripleFunNumbers struct {
+	Winning string `json:"winning"`
+	Next    string `json:"next"`
+}
+
+type AndarBaharNumbers struct {
+	Winning   int   `json:"winning"`
+	Next      int   `json:"next"`
+	NextArray []int `json:"nextArray"`
+}
+
+const realtimeHexID = "682106fe8bd0bfa24147c16a"
+
 var (
-	clients   = make(map[*websocket.Conn]bool)
-	broadcast = make(chan []byte)
-	upgrader  = websocket.Upgrader{
-		CheckOrigin: func(r *http.Request) bool { return true },
-	}
-	mutex sync.Mutex
+	userClients       = make(map[string]*Client) // userId -> Client
+	validTokens       = make(map[string]string)  // userId -> latest valid token
+	upgrader          = websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+	mutex             sync.Mutex
+	realtimeObjectID  primitive.ObjectID
+	startWatcherOnce  sync.Once
 )
 
-func InitWebSocket(router *gin.Engine, coll *mongo.Collection) {
-	go watchChanges(context.Background(), coll) // Listen for MongoDB changes
-	go handleBroadcasts()                       // Broadcast changes to WebSocket clients
+func init() {
+	var err error
+	realtimeObjectID, err = primitive.ObjectIDFromHex(realtimeHexID)
+	if err != nil {
+		log.Fatalf("invalid realtime data object id: %v", err)
+	}
+}
+
+func RegisterValidToken(userId, token string) {
+	mutex.Lock()
+	defer mutex.Unlock()
+	validTokens[userId] = token
+}
+
+func InitWebSocket(router *gin.Engine, coll *mongo.Collection, getRoundStates func() map[string]models.RoundState, getNextRounds func(string) []models.RoundState) {
+	startWatcherOnce.Do(func() {
+		go startRealtimeWatcher(coll)
+	})
 
 	router.GET("/ws", func(c *gin.Context) {
-		handleConnections(c.Writer, c.Request, coll)
+		handleConnections(c.Writer, c.Request, coll, getRoundStates, getNextRounds)
 	})
 }
 
-func handleConnections(w http.ResponseWriter, r *http.Request, coll *mongo.Collection) {
-	// Upgrade HTTP connection to WebSocket
-	ws, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		log.Println("WebSocket upgrade error:", err)
+func handleConnections(w http.ResponseWriter, r *http.Request, coll *mongo.Collection, getRoundStates func() map[string]models.RoundState, getNextRounds func(string) []models.RoundState) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			log.Printf("⚠️ recovered in handleConnections: %v", rec)
+		}
+	}()
+
+	tokenString := r.URL.Query().Get("token")
+	if tokenString == "" {
+		http.Error(w, "missing token", http.StatusBadRequest)
 		return
 	}
-	defer ws.Close()
+
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method")
+		}
+		return []byte(config.JWTSecret), nil
+	})
+	if err != nil || !token.Valid {
+		http.Error(w, "invalid token", http.StatusUnauthorized)
+		return
+	}
+
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok || claims["user_id"] == nil {
+		http.Error(w, "invalid claims", http.StatusUnauthorized)
+		return
+	}
+	userId := fmt.Sprintf("%v", claims["user_id"])
+
+	// Use session package to validate token
+	if !session.IsValidToken(userId, tokenString) {
+		log.Printf("Unauthorized connection attempt for userId: %s\n", userId)
+		http.Error(w, "unauthorized - outdated session", http.StatusUnauthorized)
+		return
+	}
+
+	wsConn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Println("webSocket upgrade error:", err)
+		return
+	}
+
+	client := &Client{Conn: wsConn, UserID: userId, Token: tokenString}
 
 	mutex.Lock()
-	clients[ws] = true
+	if existing, ok := userClients[userId]; ok {
+		existing.Mu.Lock()
+		_ = existing.Conn.WriteJSON(map[string]string{"type": "force_logout"})
+		_ = existing.Conn.Close()
+		existing.Mu.Unlock()
+	}
+	userClients[userId] = client
 	mutex.Unlock()
 
-	// Send initial full collection data to the client
-	go func(conn *websocket.Conn) {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
+	sendInitialGameState(client, coll)
+	
+	// Send server time to newly connected client (stateless timer)
+	// Pass nil to use the registered function to get per-game remaining times
+	SendServerTime(client, nil)
 
-		// Define projection to exclude sensitive fields (e.g., "roundsData1", "roundsData2")
-		projection := bson.M{
-			"roundsData1": 0,
-			"roundsData2": 0,
-		}
+	log.Println("User connected:", userId)
+	go handleClientMessages(client, coll)
 
-		// Fetch documents from MongoDB with the projection applied
-		cursor, err := coll.Find(ctx, bson.M{}, options.Find().SetProjection(projection))
-		if err != nil {
-			log.Println("Initial Find error:", err)
-			return
-		}
-		defer cursor.Close(ctx)
-
-		// Send all documents to the client
-		for cursor.Next(ctx) {
-			var doc bson.M
-			if err := cursor.Decode(&doc); err == nil {
-				if data, err := json.Marshal(doc); err == nil {
-					conn.WriteMessage(websocket.TextMessage, data) // Send document to WebSocket client
-				}
-			}
-		}
-	}(ws)
-
-	// Keep connection alive and remove on disconnect
 	for {
-		_, _, err := ws.ReadMessage()
-		if err != nil {
-			// If client disconnects, remove it from the clients map
-			mutex.Lock()
-			delete(clients, ws)
-			mutex.Unlock()
+		if _, _, err := client.Conn.ReadMessage(); err != nil {
 			break
 		}
 	}
+
+	mutex.Lock()
+	if current, ok := userClients[userId]; ok && current == client {
+		delete(userClients, userId)
+	}
+	mutex.Unlock()
+
+	_ = client.Conn.Close()
+	log.Println("User disconnected:", userId)
 }
 
-func handleBroadcasts() {
-	for {
-		// Handle new messages to broadcast to clients
-		msg := <-broadcast
-		mutex.Lock()
-		for client := range clients {
-			// Send message to all connected clients
-			if err := client.WriteMessage(websocket.TextMessage, msg); err != nil {
-				client.Close()          // Close client connection on error
-				delete(clients, client) // Remove client from map
-			}
+func handleClientMessages(client *Client, coll *mongo.Collection) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			log.Printf("⚠️ recovered in handleClientMessages for user %s: %v", client.UserID, rec)
 		}
-		mutex.Unlock()
+	}()
+
+	for {
+		_, msg, err := client.Conn.ReadMessage()
+		if err != nil {
+			break
+		}
+
+		var payload map[string]interface{}
+		if err := json.Unmarshal(msg, &payload); err != nil {
+			continue
+		}
+
+		if payload["type"] == "location_update" {
+			lat, ok1 := payload["lat"].(float64)
+			lng, ok2 := payload["lng"].(float64)
+			if !ok1 || !ok2 {
+				continue
+			}
+
+			go func(userId string, lat, lng float64) {
+				defer func() {
+					if rec := recover(); rec != nil {
+						log.Printf("⚠️ recovered in location update for user %s: %v", userId, rec)
+					}
+				}()
+
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+
+				filter := bson.M{"user_id": userId}
+				update := bson.M{
+					"$set": bson.M{
+						"location": bson.M{
+							"lat": lat,
+							"lng": lng,
+						},
+					},
+				}
+				_, err := coll.UpdateOne(ctx, filter, update)
+				if err != nil {
+					log.Println("Failed to update location:", err)
+				}
+			}(client.UserID, lat, lng)
+		}
 	}
 }
 
-func watchChanges(ctx context.Context, coll *mongo.Collection) {
-	// MongoDB change stream to listen for changes in the collection
-	opts := options.ChangeStream().SetFullDocument(options.UpdateLookup)
-	stream, err := coll.Watch(ctx, mongo.Pipeline{}, opts)
+func sendInitialGameState(client *Client, coll *mongo.Collection) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	payload, err := loadGameData(ctx, coll)
 	if err != nil {
-		log.Fatal("Mongo watch error:", err)
+		log.Printf("failed to load game data for initial push: %v", err)
+		return
+	}
+
+	sendGameData(client, payload)
+}
+
+
+func loadGameData(ctx context.Context, coll *mongo.Collection) (*GameDataPayload, error) {
+	var doc struct {
+		WinningNumber        int    `bson:"winningNumber"`
+		NextWinningNumber    int    `bson:"nextWinningNumber"`
+		WinningNumberFT      int    `bson:"winningNumberFT"`
+		NextWinningNumberFT  int    `bson:"nextWinningNumberFT"`
+		Multiplier           int    `bson:"multiplier"`
+		NextMultiplier       int    `bson:"nextMultiplier"`
+		WinningNumberTF      string `bson:"winningNumberTF"`
+		NextWinningNumberTF  string `bson:"nextWinningNumberTF"`
+		WinningNumberAB      int    `bson:"winningNumberAB"`
+		NextWinningNumberAB  int    `bson:"nextWinningNumberAB"`
+		NextABArray          []int  `bson:"nextABArray"`
+		RouletteHistory      []int    `bson:"rouletteHistory"`
+		FunTargetHistory     []int    `bson:"funTargetHistory"`
+		TripleFunHistory     []string `bson:"tripleFunHistory"`
+		ABHistory            []int    `bson:"ABHistory"`
+	}
+
+	if err := coll.FindOne(ctx, bson.M{"_id": realtimeObjectID}).Decode(&doc); err != nil {
+		return nil, err
+	}
+
+	return &GameDataPayload{
+		Type: "game_data",
+		Roulette: GameNumbers{
+			Winning: doc.WinningNumber,
+			Next:    doc.NextWinningNumber,
+		},
+		RouletteHistory: doc.RouletteHistory,
+		FunTarget: FunTargetNumbers{
+			Winning:        doc.WinningNumberFT,
+			Next:           doc.NextWinningNumberFT,
+			Multiplier:     doc.Multiplier,
+			NextMultiplier: doc.NextMultiplier,
+		},
+		FunTargetHistory: doc.FunTargetHistory,
+		TripleFun: TripleFunNumbers{
+			Winning: doc.WinningNumberTF,
+			Next:    doc.NextWinningNumberTF,
+		},
+		TripleFunHistory: doc.TripleFunHistory,
+		AndarBahar: AndarBaharNumbers{
+			Winning:   doc.WinningNumberAB,
+			Next:      doc.NextWinningNumberAB,
+			NextArray: doc.NextABArray,
+		},
+		ABHistory: doc.ABHistory,
+	}, nil
+}
+
+func sendGameData(client *Client, payload *GameDataPayload) {
+	client.Mu.Lock()
+	defer client.Mu.Unlock()
+	if err := client.Conn.WriteJSON(payload); err != nil {
+		log.Printf("failed to send game data to user %s: %v", client.UserID, err)
+	}
+}
+
+func broadcastGameData(payload *GameDataPayload) {
+	mutex.Lock()
+	clients := make([]*Client, 0, len(userClients))
+	for _, c := range userClients {
+		clients = append(clients, c)
+	}
+	mutex.Unlock()
+
+	for _, c := range clients {
+		sendGameData(c, payload)
+	}
+}
+
+func startRealtimeWatcher(coll *mongo.Collection) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			log.Printf("⚠️ recovered in startRealtimeWatcher: %v", rec)
+		}
+	}()
+
+	ctx := context.Background()
+
+	pipeline := mongo.Pipeline{
+		{{Key: "$match", Value: bson.D{
+			{Key: "operationType", Value: bson.D{{Key: "$in", Value: bson.A{"insert", "update", "replace"}}}},
+			{Key: "documentKey._id", Value: realtimeObjectID},
+		}}},
+	}
+
+	stream, err := coll.Watch(ctx, pipeline, options.ChangeStream().SetFullDocument(options.UpdateLookup))
+	if err != nil {
+		log.Printf("failed to start realtime watcher: %v", err)
+		return
 	}
 	defer stream.Close(ctx)
 
-	// Continuously check for changes in the MongoDB collection
 	for stream.Next(ctx) {
-		var event bson.M
-		if err := stream.Decode(&event); err == nil {
-			if fullDoc, ok := event["fullDocument"]; ok {
-				// If full document exists in the change event, broadcast the update
-				if data, err := json.Marshal(fullDoc); err == nil {
-					broadcast <- data // Send update to broadcast channel
-				}
-			}
+		innerCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		payload, err := loadGameData(innerCtx, coll)
+		cancel()
+		if err != nil {
+			log.Printf("failed to refresh game data after change event: %v", err)
+			continue
 		}
+		broadcastGameData(payload)
+	}
+
+	if err := stream.Err(); err != nil {
+		log.Printf("realtime watcher error: %v", err)
 	}
 }
